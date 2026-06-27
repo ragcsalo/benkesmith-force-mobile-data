@@ -21,7 +21,7 @@ You can install the plugin directly via Cordova CLI from your local machine or y
 
 ```bash
 # Install from GitHub
-cordova plugin add [https://github.com/ragcsalo/benkesmith-force-mobile-data.git](https://github.com/ragcsalo/benkesmith-force-mobile-data.git)
+cordova plugin add https://github.com/ragcsalo/benkesmith-force-mobile-data.git
 
 # Install from a local directory (for development)
 cordova plugin add /path/to/benkesmith-force-mobile-data
