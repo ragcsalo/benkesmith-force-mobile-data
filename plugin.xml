@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="com.benkesmith.forcemobiledata" xmlns="http://apache.org/cordova/ns/plugins/1.0" version="1.0.0">
+    <name>benkesmith-force-mobile-data</name>
+    <description>A Cordova plugin for forcing mobile data even if a strong Wi-Fi signal is available.</description>
+    <license>Apache 2.0</license>
+    <keywords>cordova,plugin,mobile,data,cellular,wifi</keywords>
+    
+    <js-module name="ForceMobileData" src="www/ForceMobileData.js">
+        <clobbers target="ForceMobileData" />
+    </js-module>
+
+    <platform name="android">
+        <config-file parent="/*" target="res/xml/config.xml">
+            <feature name="ForceMobileData">
+                <param name="android-package" value="com.benkesmith.forcemobiledata.ForceMobileData" />
+            </feature>
+        </config-file>
+
+        <config-file target="AndroidManifest.xml" parent="/*">
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+            <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+        </config-file>
+
+        <source-file src="src/android/ForceMobileData.java" target-dir="src/com/benkesmith/forcemobiledata" />
+    </platform>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="ForceMobileData">
+                <param name="ios-package" value="ForceMobileData" />
+            </feature>
+        </config-file>
+        <source-file src="src/ios/ForceMobileData.h" />
+        <source-file src="src/ios/ForceMobileData.m" />
+    </platform>
+</plugin>

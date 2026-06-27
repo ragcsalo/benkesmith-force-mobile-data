@@ -1,0 +1,29 @@
+{
+  "name": "benkesmith-force-mobile-data",
+  "version": "1.0.0",
+  "description": "A Cordova plugin for forcing mobile data even if a strong Wi-Fi signal is available.",
+  "cordova": {
+    "id": "com.benkesmith.forcemobiledata",
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ragcsalo/benkesmith-force-mobile-data.git"
+  },
+  "keywords": [
+    "cordova",
+    "plugin",
+    "mobile",
+    "data",
+    "cellular",
+    "wifi"
+  ],
+  "author": "Benke Smith <benke.smith@gmail.com>",
+  "license": "Apache-2.0",
+  "engines": {
+    "cordova": ">=6.0.0"
+  }
+}
