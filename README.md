@@ -9,8 +9,9 @@ A Cordova plugin for **forcing mobile data network routing** even if a strong Wi
 ## Features
 
 * 🚀 **Process-Level Routing (Android):** Forces the entire application process to bind to cellular data interfaces automatically.
+* 🔍 **Smart Wi-Fi Monitoring (Android):** Once cellular routing is forced, the plugin monitors the Wi-Fi connection in the background. As soon as a stable internet uplink is restored on the Wi-Fi network, it automatically drops the cellular lock and restores default OS routing.
+* 📢 **Real-Time Events (Android):** Exposes an event stream listener to notify your JavaScript layer immediately when a routing override or automatic recovery occurs.
 * 🌐 **Selective Request Routing (iOS):** Exposes hooks to configure native HTTP connection sessions to actively ignore or fallback from dead Wi-Fi connections via `Multipath Service Handover`.
-* 🔋 **Simple Toggle API:** Easily enable or disable the network override using simple asynchronous JavaScript calls.
 
 ---
 
@@ -20,7 +21,7 @@ You can install the plugin directly via Cordova CLI from your local machine or y
 
 ```bash
 # Install from GitHub
-cordova plugin add https://github.com/ragcsalo/benkesmith-force-mobile-data.git
+cordova plugin add [https://github.com/ragcsalo/benkesmith-force-mobile-data.git](https://github.com/ragcsalo/benkesmith-force-mobile-data.git)
 
 # Install from a local directory (for development)
 cordova plugin add /path/to/benkesmith-force-mobile-data
