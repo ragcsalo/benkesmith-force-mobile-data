@@ -6,6 +6,9 @@ var ForceMobileData = {
     },
     disable: function (successCallback, errorCallback) {
         exec(successCallback, errorCallback, 'ForceMobileData', 'disable', []);
+    },
+    registerListener: function (eventCallback, errorCallback) {
+        exec(eventCallback, errorCallback, 'ForceMobileData', 'registerListener', []);
     }
 };
 
