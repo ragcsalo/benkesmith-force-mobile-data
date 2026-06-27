@@ -9,6 +9,9 @@ var ForceMobileData = {
     },
     registerListener: function (eventCallback, errorCallback) {
         exec(eventCallback, errorCallback, 'ForceMobileData', 'registerListener', []);
+    },
+    checkStatus: function (successCallback, errorCallback) {
+        exec(successCallback, errorCallback, 'ForceMobileData', 'checkStatus', []);
     }
 };
 
