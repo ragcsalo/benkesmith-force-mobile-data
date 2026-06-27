@@ -16,22 +16,22 @@ static BOOL _forceMobileDataActive = NO;
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     
     if (_forceMobileDataActive) {
-        // Explicitly allow and prioritize mobile data
         config.allowsCellularAccess = YES;
         config.allowsConstrainedNetworkAccess = YES;
         config.allowsExpensiveNetworkAccess = YES;
-        
-        // Handover mode tells iOS to actively drop failing interfaces (like dead Wi-Fi)
         config.multipathServiceType = NSURLSessionMultipathServiceTypeHandover;
+        
+        // THE TRICK: Tell this session that Wi-Fi proxies are completely restricted.
+        // Emptying or manipulating the proxy dictionary forces immediate fallback logic 
+        // down to the secondary cellular radio layer.
+        config.connectionProxyDictionary = @{}; 
     }
     
     return config;
 }
 
 - (void)registerListener:(CDVInvokedUrlCommand*)command {
-    // Keep a persistent channel open to send events to JS layer
     _eventCallbackId = command.callbackId;
-    
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
     [pluginResult setKeepCallbackAsBool:YES];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
@@ -44,7 +44,6 @@ static BOOL _forceMobileDataActive = NO;
         if (data != nil) {
             [json setObject:data forKey:@"data"];
         }
-        
         CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:json];
         [result setKeepCallbackAsBool:YES];
         [self.commandDelegate sendPluginResult:result callbackId:_eventCallbackId];
@@ -53,19 +52,14 @@ static BOOL _forceMobileDataActive = NO;
 
 - (void)enable:(CDVInvokedUrlCommand*)command {
     _forceMobileDataActive = YES;
-    
     [self sendJsonEventToJSWithStatus:@"ONLINE" data:@"MOBILE"];
-    
-    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK 
-                                                      messageAsString:@"iOS requests marked to prioritize Cellular Data over Wi-Fi."];
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Forced Cellular active."];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
 - (void)disable:(CDVInvokedUrlCommand*)command {
-    _forceMobileDataActive = _forceMobileDataActive = NO;
-    
-    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK 
-                                                      messageAsString:@"iOS requests returned to OS routing defaults."];
+    _forceMobileDataActive = NO;
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Returned to default."];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
@@ -73,7 +67,6 @@ static BOOL _forceMobileDataActive = NO;
     [self.commandDelegate runInBackground:^{
         NSMutableDictionary* resultJson = [[NSMutableDictionary alloc] init];
         
-        // 1. Get Reachability Flags to evaluate physical hardware states
         struct sockaddr_in zeroAddress;
         bzero(&zeroAddress, sizeof(zeroAddress));
         zeroAddress.sin_len = sizeof(zeroAddress);
@@ -86,73 +79,50 @@ static BOOL _forceMobileDataActive = NO;
         
         BOOL isReachable = gotFlags && (flags & kSCNetworkReachabilityFlagsReachable);
         BOOL isConnectionRequired = flags & kSCNetworkReachabilityFlagsConnectionRequired;
-        BOOL hasNetworkHardware = isReachable && !isConnectionRequired;
         
-        if (!hasNetworkHardware) {
+        if (!isReachable || isConnectionRequired) {
             [resultJson setObject:@"OFFLINE" forKey:@"status"];
-            CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultJson];
-            [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+            [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultJson] callbackId:command.callbackId];
             return;
         }
         
-        BOOL isWifiHardwareConnected = gotFlags && !(flags & kSCNetworkReachabilityFlagsIsWWAN);
-        BOOL isCellularHardwareConnected = gotFlags && (flags & kSCNetworkReachabilityFlagsIsWWAN);
-        
-        // 2. Perform a low-level diagnostic check to see if the interface has an internet connection
+        BOOL isWifi = gotFlags && !(flags & kSCNetworkReachabilityFlagsIsWWAN);
+        BOOL isMobile = gotFlags && (flags & kSCNetworkReachabilityFlagsIsWWAN);
         BOOL hasInternet = [self testInternetConnectivity];
         
         if (hasInternet) {
             [resultJson setObject:@"ONLINE" forKey:@"status"];
-            if (isWifiHardwareConnected) {
-                [resultJson setObject:@"WIFI" forKey:@"data"];
-            } else if (isCellularHardwareConnected) {
-                [resultJson setObject:@"MOBILE" forKey:@"data"];
-            } else {
-                [resultJson setObject:@"UNKNOWN" forKey:@"data"];
-            }
+            [resultJson setObject:(isWifi ? @"WIFI" : @"MOBILE") forKey:@"data"];
         } else {
-            // Internet test failed. Check if we're connected to a dead Wi-Fi network.
-            if (isWifiHardwareConnected) {
+            if (isWifi) {
                 [resultJson setObject:@"ONLINE_WIFI_DEAD" forKey:@"status"];
                 [resultJson setObject:@"WIFI" forKey:@"data"];
             } else {
                 [resultJson setObject:@"OFFLINE" forKey:@"status"];
             }
         }
-        
-        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultJson];
-        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-    } e];
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultJson] callbackId:command.callbackId];
+    }];
 }
 
 - (BOOL)testInternetConnectivity {
     __block BOOL success = NO;
-    
-    // Create an explicit network validation session
     NSURL *url = [NSURL URLWithString:@"https://connectivitycheck.gstatic.com/generate_204"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
     [request setHTTPMethod:@"HEAD"];
     
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    
-    // Use default baseline configurations (do not lock to mobile data during evaluation check)
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
-    config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
     
-    NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-        if (error == nil && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-            if ([httpResponse statusCode] == 204 || [httpResponse statusCode] == 200) {
-                success = YES;
-            }
+    [[session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error == nil && ((NSHTTPURLResponse *)response).statusCode == 204) {
+            success = YES;
         }
         dispatch_semaphore_signal(semaphore);
-    }];
+    }] resume];
     
-    [task resume];
     dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)));
-    
     return success;
 }
 
