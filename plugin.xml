@@ -30,6 +30,9 @@
                 <param name="ios-package" value="ForceMobileData" />
             </feature>
         </config-file>
+        <framework src="Network.framework" />
+        <source-file src="src/ios/CellularURLProtocol.m" />
+        <header-file src="src/ios/CellularURLProtocol.h" />
         <source-file src="src/ios/ForceMobileData.h" />
         <source-file src="src/ios/ForceMobileData.m" />
     </platform>
