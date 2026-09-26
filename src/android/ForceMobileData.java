@@ -20,11 +20,28 @@ import java.net.URL;
 public class ForceMobileData extends CordovaPlugin {
 
     private static final String TAG = "ForceMobileData";
+    // Tuned down from 5000/5000/1000: the original values gave a robust false-positive
+    // guard (see the 2026-09-02 fix) but pushed the worst case for the very first,
+    // app-startup checkStatus() call (the one the "Network: checking..." home-screen
+    // label waits on) to ~11s. 2 attempts still guards against a one-off transient blip,
+    // just with a snappier ceiling (~6.4s worst case).
+    private static final int CONNECT_TIMEOUT_MS = 3000;
+    private static final int READ_TIMEOUT_MS = 3000;
+    private static final int INTERNET_CHECK_ATTEMPTS = 2;
+    private static final long INTERNET_CHECK_RETRY_DELAY_MS = 400;
+    private static final long RECOVERY_POLL_INTERVAL_MS = 5000;
+    // No Wi-Fi (mobile data only), and Android hasn't validated the network yet: one longer probe
+    // instead of two 3 s ones - a sleeping mobile radio needs a moment, and the short probes often
+    // reported a working mobile connection OFFLINE (the indicator flipped to "no internet").
+    private static final int CELLULAR_CONNECT_TIMEOUT_MS = 6000;
+    private static final int CELLULAR_READ_TIMEOUT_MS = 6000;
+
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback cellularCallback;
-    private ConnectivityManager.NetworkCallback wifiMonitorCallback;
     private CallbackContext eventCallbackContext;
     private boolean isForcingCellular = false;
+    private android.os.Handler recoveryHandler;
+    private Runnable recoveryRunnable;
 
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
@@ -134,7 +151,16 @@ public class ForceMobileData extends CordovaPlugin {
                         return;
                     }
 
-                    if (isInternetWorking(null)) {
+                    // Android checks the network's internet itself (the same generate_204 probe) and
+                    // marks it VALIDATED - if so, no probe of our own is needed: that is what made a
+                    // working mobile connection look OFFLINE now and then. Not validated (yet) -> one
+                    // longer probe over that network.
+                    boolean validated = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                            && activeCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                    boolean works = validated || probeInternet(activeNetwork, CELLULAR_CONNECT_TIMEOUT_MS, CELLULAR_READ_TIMEOUT_MS);
+                    Log.d(TAG, "checkStatus (no Wi-Fi): validated=" + validated + " works=" + works);
+
+                    if (works) {
                         resultJson.put("status", "ONLINE");
                         if (activeCaps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                             resultJson.put("data", "MOBILE");
@@ -191,36 +217,79 @@ public class ForceMobileData extends CordovaPlugin {
         }
     }
 
+    // Actively re-probes both interfaces every RECOVERY_POLL_INTERVAL_MS while cellular is
+    // forced, instead of relying solely on ConnectivityManager's onAvailable (which only fires
+    // on a fresh connect/reconnect and misses a Wi-Fi network's internet recovering while it
+    // stayed connected the whole time). Wi-Fi is always preferred back as soon as it's healthy.
     private void startWifiInternetMonitor() {
-        if (wifiMonitorCallback != null) return;
+        if (recoveryHandler != null) return;
 
-        NetworkRequest.Builder builder = new NetworkRequest.Builder();
-        builder.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
-
-        wifiMonitorCallback = new ConnectivityManager.NetworkCallback() {
+        recoveryHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        recoveryRunnable = new Runnable() {
             @Override
-            public void onAvailable(final Network network) {
+            public void run() {
+                if (!isForcingCellular) return;
+
                 cordova.getThreadPool().execute(new Runnable() {
                     @Override
                     public void run() {
-                        if (isInternetWorking(network)) {
-                            Log.d(TAG, "Stable Wi-Fi internet detected! Reverting network route.");
+                        Network wifiNetwork = null;
+                        Network cellularNetwork = null;
+                        Network[] allNetworks = connectivityManager.getAllNetworks();
+                        for (Network net : allNetworks) {
+                            NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(net);
+                            if (caps != null) {
+                                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) wifiNetwork = net;
+                                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) cellularNetwork = net;
+                            }
+                        }
+
+                        if (wifiNetwork != null && isInternetWorking(wifiNetwork)) {
+                            Log.d(TAG, "Wi-Fi internet recovered, reverting from forced cellular.");
                             clearBinding();
                             sendJsonEventToJS("ONLINE", "WIFI");
+                            return;
+                        }
+
+                        if (cellularNetwork == null || !isInternetWorking(cellularNetwork)) {
+                            Log.w(TAG, "Forced cellular route has no working internet either.");
+                            sendJsonEventToJS("OFFLINE", null);
+                        }
+
+                        if (isForcingCellular && recoveryHandler != null) {
+                            recoveryHandler.postDelayed(recoveryRunnable, RECOVERY_POLL_INTERVAL_MS);
                         }
                     }
                 });
             }
         };
 
-        try {
-            connectivityManager.registerNetworkCallback(builder.build(), wifiMonitorCallback);
-        } catch (Exception e) {
-            Log.e(TAG, "Error registering Wi-Fi monitor: " + e.getMessage());
-        }
+        recoveryHandler.postDelayed(recoveryRunnable, RECOVERY_POLL_INTERVAL_MS);
     }
 
+    // Retries a couple of times before concluding a network's internet is actually dead -
+    // a single timed-out or blipped probe otherwise flips the UI on a purely transient hiccup.
     private boolean isInternetWorking(Network network) {
+        for (int attempt = 1; attempt <= INTERNET_CHECK_ATTEMPTS; attempt++) {
+            if (probeInternet(network)) {
+                return true;
+            }
+            if (attempt < INTERNET_CHECK_ATTEMPTS) {
+                try {
+                    Thread.sleep(INTERNET_CHECK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean probeInternet(Network network) {
+        return probeInternet(network, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+    }
+
+    private boolean probeInternet(Network network, int connectTimeoutMs, int readTimeoutMs) {
         HttpURLConnection urlConnection = null;
         try {
             URL url = new URL("https://connectivitycheck.gstatic.com/generate_204");
@@ -230,8 +299,8 @@ public class ForceMobileData extends CordovaPlugin {
                 urlConnection = (HttpURLConnection) url.openConnection();
             }
             urlConnection.setInstanceFollowRedirects(false);
-            urlConnection.setConnectTimeout(3000);
-            urlConnection.setReadTimeout(3000);
+            urlConnection.setConnectTimeout(connectTimeoutMs);
+            urlConnection.setReadTimeout(readTimeoutMs);
             urlConnection.setUseCaches(false);
             urlConnection.connect();
             return (urlConnection.getResponseCode() == 204);
@@ -255,9 +324,10 @@ public class ForceMobileData extends CordovaPlugin {
             try { connectivityManager.unregisterNetworkCallback(cellularCallback); } catch (Exception e) {}
             cellularCallback = null;
         }
-        if (wifiMonitorCallback != null) {
-            try { connectivityManager.unregisterNetworkCallback(wifiMonitorCallback); } catch (Exception e) {}
-            wifiMonitorCallback = null;
+        if (recoveryHandler != null) {
+            recoveryHandler.removeCallbacks(recoveryRunnable);
+            recoveryHandler = null;
+            recoveryRunnable = null;
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             connectivityManager.bindProcessToNetwork(null);
