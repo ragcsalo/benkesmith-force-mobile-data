@@ -30,10 +30,11 @@
                 <param name="ios-package" value="ForceMobileData" />
             </feature>
         </config-file>
-        <framework src="Network.framework" />
-        <source-file src="src/ios/CellularProxy.m" />
-        <header-file src="src/ios/CellularProxy.h" />
-        <source-file src="src/ios/ForceMobileData.h" />
+        <header-file src="src/ios/ForceMobileData.h" />
         <source-file src="src/ios/ForceMobileData.m" />
+        <header-file src="src/ios/CellularProxy.h" />
+        <source-file src="src/ios/CellularProxy.m" />
+        <framework src="SystemConfiguration.framework" />
+        <framework src="Network.framework" />
     </platform>
 </plugin>
